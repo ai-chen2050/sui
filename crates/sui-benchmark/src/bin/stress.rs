@@ -8,6 +8,9 @@ use prometheus::Registry;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use sui_protocol_config::Chain;
+use pprof::protos::Message;
+use std::fs::File;
+use std::io::Write;
 use tokio::time::sleep;
 
 use std::sync::Arc;
@@ -54,6 +57,11 @@ use tokio::sync::Barrier;
 #[tokio::main]
 async fn main() -> Result<()> {
     let opts: Opts = Opts::parse();
+
+    let guard = pprof::ProfilerGuardBuilder::default()
+        .frequency(100)
+        .build()
+        .unwrap();
 
     // TODO: query the network for the current protocol version.
     let protocol_config = match opts.protocol_version {
@@ -160,7 +168,7 @@ async fn main() -> Result<()> {
     });
     let joined = handle.join();
     if let Err(err) = joined {
-        Err(anyhow!("Failed to join client runtime: {:?}", err))
+        return Err(anyhow!("Failed to join client runtime: {:?}", err));
     } else {
         // send signal to stop the server runtime
         bench_setup
@@ -207,6 +215,20 @@ async fn main() -> Result<()> {
             },
             Err(e) => eprintln!("{e:?}"),
         }
-        Ok(())
+        // Ok(())
     }
+    
+    // stop profiling and generate the profiled report.
+    match guard.report().build() {
+        Ok(report) => {
+            let mut file = File::create("profile.pb").unwrap();
+            let profile = report.pprof().unwrap();
+    
+            let mut content = Vec::new();
+            profile.encode(&mut content).unwrap();
+            file.write_all(&content).unwrap();    
+        }
+        Err(_) => {}
+    }
+    Ok(())
 }
